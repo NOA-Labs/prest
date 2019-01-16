@@ -92,7 +92,16 @@ func Load() {
 func init() {
 	removeOperatorRegex = regexp.MustCompile(`\$[a-z]+.`)
 	insertTableNameRegex = regexp.MustCompile(`(?i)INTO\s+([\w|\.]*\.)*(\w+)\s*\(`)
-	insertTableNameQuotesRegex = regexp.MustCompile(`(?i)INTO\s+([\w|\.|"]*\.)*"(\w+)"\s*\(`)
+	insertTableNameQuotesRegex = regexp.MustCompile(`(?i)INTO\s+((?:"(?:[^"]|"{2})+"*\.){2})"((?:[^"]|"{2})+)"\s*\(`)
+	/* 	explanation for the regex above:
+
+	   	first group captures everything from INTO to the ( character
+
+	   	second group captures a non-capturing group matched twice (to capture both database and schema )
+	   	the non capturing group matches " character, then every characted any amount of times except for double quotes, or double quotes used twice, and a . character
+
+	   	third group follows match for " character, then matches every non " character non-zero times or " character followed by " */
+
 	groupRegex = regexp.MustCompile(`\"(.+?)\"`)
 }
 
@@ -124,30 +133,23 @@ func Prepare(db *sqlx.DB, SQL string) (stmt *sql.Stmt, err error) {
 // chkInvalidIdentifier return true if identifier is invalid
 func chkInvalidIdentifier(identifer ...string) bool {
 	for _, ival := range identifer {
-		if ival == "" || len(ival) > 63 || unicode.IsDigit([]rune(ival)[0]) {
+		ilen := len(ival)
+		lastWasQuote := false
+		if ilen == 0 || ilen > 63 || unicode.IsDigit([]rune(ival)[0]) {
 			return true
 		}
-		count := 0
-		for _, v := range ival {
-			if !unicode.IsLetter(v) &&
-				!unicode.IsDigit(v) &&
-				v != '(' &&
-				v != ')' &&
-				v != '_' &&
-				v != '.' &&
-				v != '-' &&
-				v != '*' &&
-				v != '[' &&
-				v != ']' &&
-				v != '"' {
+		for i, v := range ival {
+			if v == '"' && i != ilen {
+				if []rune(ival)[i+1] == '"' {
+					lastWasQuote = true
+					continue
+				}
+				if lastWasQuote == true {
+					lastWasQuote = false
+					continue
+				}
 				return true
 			}
-			if unicode.Is(unicode.Quotation_Mark, v) {
-				count++
-			}
-		}
-		if count%2 != 0 {
-			return true
 		}
 	}
 	return false
@@ -196,8 +198,8 @@ func (adapter *Postgres) WhereByRequest(r *http.Request, initialPlaceholderID in
 							return
 						}
 					}
-					pid++
-					continue
+					// pid++
+					// continue
 				}
 
 				if chkInvalidIdentifier(key) {
@@ -206,8 +208,9 @@ func (adapter *Postgres) WhereByRequest(r *http.Request, initialPlaceholderID in
 				}
 
 				if k == 0 {
-					fields := strings.Split(key, ".")
-					key = fmt.Sprintf(`"%s"`, strings.Join(fields, `"."`))
+					// fields := strings.Split(key, ".")
+					// key = fmt.Sprintf(`"%s"`, strings.Join(fields, `"."`))
+					key = fmt.Sprintf(`"%s"`, key)
 				}
 
 				switch op {
@@ -282,9 +285,7 @@ func (adapter *Postgres) SetByRequest(r *http.Request, initialPlaceholderID int)
 			err = errors.New("Set: Invalid identifier")
 			return
 		}
-		keys := strings.Split(key, ".")
-		key = fmt.Sprintf(`"%s"`, strings.Join(keys, `"."`))
-		fields = append(fields, fmt.Sprintf(`%s=$%d`, key, initialPlaceholderID))
+		fields = append(fields, fmt.Sprintf(`"%s"=$%d`, key, initialPlaceholderID))
 
 		switch value.(type) {
 		case []interface{}:
@@ -1278,10 +1279,13 @@ func (adapter *Postgres) TableClause() (query string) {
 
 // TableWhere generate table where syntax
 func (adapter *Postgres) TableWhere(requestWhere string) (whereSyntax string) {
+	fmt.Println("TableWhere")
+	fmt.Println(requestWhere)
 	whereSyntax = statements.TablesWhere
 	if requestWhere != "" {
 		whereSyntax = fmt.Sprint(whereSyntax, " AND ", requestWhere)
 	}
+	fmt.Println(whereSyntax)
 	return
 }
 
@@ -1303,10 +1307,13 @@ func (adapter *Postgres) SchemaTablesClause() (query string) {
 
 // SchemaTablesWhere generate schema tables where syntax
 func (adapter *Postgres) SchemaTablesWhere(requestWhere string) (whereSyntax string) {
+	fmt.Println("SchemaTablesWhere")
 	whereSyntax = statements.SchemaTablesWhere
+	fmt.Println(whereSyntax)
 	if requestWhere != "" {
 		whereSyntax = fmt.Sprint(whereSyntax, " AND ", requestWhere)
 	}
+	fmt.Println(whereSyntax)
 	return
 }
 
