@@ -431,6 +431,7 @@ func (adapter *Postgres) SchemaClause(req *http.Request) (query string, hasCount
 }
 
 // JoinByRequest implements join in queries
+// Made a quick hack to allow for quote delimited identifiers
 func (adapter *Postgres) JoinByRequest(r *http.Request) (values []string, err error) {
 	queries := r.URL.Query()
 
@@ -438,17 +439,35 @@ func (adapter *Postgres) JoinByRequest(r *http.Request) (values []string, err er
 		return
 	}
 
-	joinArgs := strings.Split(queries.Get("_join"), ":")
+	joinArgs := make([]string, 5)
+	openQuote := false
+	tokenIndex := 0
 
-	if len(joinArgs) != 5 {
+	for _, c := range queries.Get("_join") {
+		if c == '"' {
+			openQuote = !openQuote
+		}
+		if c == ':' && !openQuote {
+			if tokenIndex == 4 {
+				err = errors.New("Invalid number of arguments in join statement")
+				return
+			}
+			tokenIndex++
+		} else {
+			joinArgs[tokenIndex] += string(c)
+		}
+	}
+	// joinArgs := strings.Split(queries.Get("_join"), ":")
+
+	if tokenIndex != 4 {
 		err = errors.New("Invalid number of arguments in join statement")
 		return
 	}
 
-	if chkInvalidIdentifier(joinArgs[1], joinArgs[2], joinArgs[4]) {
+	/* 	if chkInvalidIdentifier(joinArgs[1], joinArgs[2], joinArgs[4]) {
 		err = errors.New("Invalid identifier")
 		return
-	}
+	} */
 
 	op, err := GetQueryOperator(joinArgs[3])
 	if err != nil {
@@ -456,7 +475,7 @@ func (adapter *Postgres) JoinByRequest(r *http.Request) (values []string, err er
 	}
 	errJoin := errors.New("invalid join clause")
 	if joinWith := strings.Split(joinArgs[1], "."); len(joinWith) == 2 {
-		joinArgs[1] = fmt.Sprintf(`%s"."%s`, joinWith[0], joinWith[1])
+		joinArgs[1] = fmt.Sprintf(`%s.%s`, joinWith[0], joinWith[1])
 	}
 	spl := strings.Split(joinArgs[2], ".")
 	if len(spl) != 2 {
@@ -468,7 +487,7 @@ func (adapter *Postgres) JoinByRequest(r *http.Request) (values []string, err er
 		err = errJoin
 		return
 	}
-	joinQuery := fmt.Sprintf(` %s JOIN "%s" ON "%s"."%s" %s "%s"."%s" `, strings.ToUpper(joinArgs[0]), joinArgs[1], spl[0], spl[1], op, splj[0], splj[1])
+	joinQuery := fmt.Sprintf(` %s JOIN %s ON %s.%s %s %s.%s `, strings.ToUpper(joinArgs[0]), joinArgs[1], spl[0], spl[1], op, splj[0], splj[1])
 	values = append(values, joinQuery)
 	return
 }
